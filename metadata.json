@@ -1,0 +1,5 @@
+{
+  "name": "  Win11 Explorer 2",
+  "description": "A fully functional Windows 11-style File Explorer simulation featuring real file/folder uploads, drag-and-drop organization, marquee selection, and virtual file system management.",
+  "requestFramePermissions": []
+}
