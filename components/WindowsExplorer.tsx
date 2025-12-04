@@ -178,7 +178,7 @@ export default function WindowsExplorer() {
                 }
             } else {
                  for (const item of INITIAL_FILES) {
-                     await saveFileToDB(item);
+                     await saveFileToDB(item).catch(console.error);
                  }
             }
         } catch (e) {
@@ -515,9 +515,13 @@ export default function WindowsExplorer() {
                             if (e.target?.result) {
                                 const coverUrl = e.target.result as string;
                                 setFileSystem(prev => {
+                                    // Functional update for state
                                     const updated = prev.map(f => f.id === fileId ? { ...f, cover: coverUrl } : f);
+                                    
+                                    // Trigger side-effect (DB Save) separately to avoid race conditions in Strict Mode
                                     const item = updated.find(f => f.id === fileId);
-                                    if(item) saveFileToDB(item);
+                                    if(item) saveFileToDB(item).catch(console.error);
+                                    
                                     return updated;
                                 });
                                 setPreviewItem(prev => (prev && prev.id === fileId) ? { ...prev, cover: coverUrl } : prev);
@@ -560,7 +564,7 @@ export default function WindowsExplorer() {
                         parentId: currentParent,
                         date: new Date().toISOString().split('T')[0]
                     };
-                    saveFileToDB(newFolder);
+                    saveFileToDB(newFolder).catch(console.error);
                     if(!newItems.find(i => i.id === newId)) newItems.push(newFolder);
                     currentParent = newId;
                     createdFolders.set(uniqueKey, newId);
@@ -571,46 +575,50 @@ export default function WindowsExplorer() {
      };
 
      for (const file of Array.from(files)) {
-        const relativePath = file.webkitRelativePath || file.name;
-        const parts = relativePath.split('/');
-        const fileName = parts.pop()!;
-        const folderParts = parts;
+        try {
+            const relativePath = file.webkitRelativePath || file.name;
+            const parts = relativePath.split('/');
+            const fileName = parts.pop()!;
+            const folderParts = parts;
 
-        const parentId = folderParts.length > 0 ? getOrCreateFolder(folderParts, currentPath) : currentPath;
+            const parentId = folderParts.length > 0 ? getOrCreateFolder(folderParts, currentPath) : currentPath;
 
-        let type: any = 'file';
-        let src = undefined;
-        
-        if (file.type.startsWith('image/')) {
-            type = 'image';
-            src = URL.createObjectURL(file);
-        } else if (file.type.includes('pdf')) type = 'pdf';
-        else if (file.type.includes('excel') || file.type.includes('sheet')) type = 'excel';
-        else if (file.type.includes('word') || file.type.includes('document')) type = 'word';
-        else if (file.type.startsWith('video/')) {
-            type = 'video';
-            src = URL.createObjectURL(file);
-        } else if (file.type.startsWith('audio/')) {
-            type = 'audio';
-            src = URL.createObjectURL(file);
-        }
+            let type: any = 'file';
+            let src = undefined;
+            
+            if (file.type.startsWith('image/')) {
+                type = 'image';
+                src = URL.createObjectURL(file);
+            } else if (file.type.includes('pdf')) type = 'pdf';
+            else if (file.type.includes('excel') || file.type.includes('sheet')) type = 'excel';
+            else if (file.type.includes('word') || file.type.includes('document')) type = 'word';
+            else if (file.type.startsWith('video/')) {
+                type = 'video';
+                src = URL.createObjectURL(file);
+            } else if (file.type.startsWith('audio/')) {
+                type = 'audio';
+                src = URL.createObjectURL(file);
+            }
 
-        const newId = `file_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-        const newItem: FileSystemItem = {
-            id: newId,
-            name: fileName,
-            type,
-            parentId,
-            size: file.size,
-            date: new Date().toISOString().split('T')[0],
-            src,
-            content: file 
-        };
-        newItems.push(newItem);
-        await saveFileToDB(newItem);
+            const newId = `file_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+            const newItem: FileSystemItem = {
+                id: newId,
+                name: fileName,
+                type,
+                parentId,
+                size: file.size,
+                date: new Date().toISOString().split('T')[0],
+                src,
+                content: file 
+            };
+            newItems.push(newItem);
+            await saveFileToDB(newItem);
 
-        if (type === 'audio') {
-            extractAudioMetadata(file, newId);
+            if (type === 'audio') {
+                extractAudioMetadata(file, newId);
+            }
+        } catch(e) {
+            console.error("Error processing file", file.name, e);
         }
      }
 
@@ -660,7 +668,7 @@ export default function WindowsExplorer() {
                 setFileSystem(prev => {
                     const updated = prev.map(f => f.id === previewItem.id ? { ...f, cover: url } : f);
                     const item = updated.find(f => f.id === previewItem.id);
-                    if (item) saveFileToDB(item);
+                    if (item) saveFileToDB(item).catch(console.error);
                     return updated;
                 });
                 setPreviewItem(prev => prev ? { ...prev, cover: url } : null);
@@ -681,18 +689,20 @@ export default function WindowsExplorer() {
           if (data) {
               const movedIds = JSON.parse(data) as string[];
               if (movedIds && movedIds.length > 0) {
-                  setFileSystem(prev => {
-                      const updated = prev.map(f => 
-                          movedIds.includes(f.id) && f.parentId !== targetId 
-                              ? { ...f, parentId: targetId } 
-                              : f
-                      );
-                      movedIds.forEach(id => {
-                          const item = updated.find(f => f.id === id);
-                          if(item) saveFileToDB(item);
-                      });
-                      return updated;
+                  // Move items in State
+                  const newItems = fileSystem.map(f => 
+                       movedIds.includes(f.id) && f.parentId !== targetId 
+                          ? { ...f, parentId: targetId } 
+                          : f
+                  );
+                  setFileSystem(newItems);
+
+                  // Update DB
+                  movedIds.forEach(id => {
+                      const item = newItems.find(f => f.id === id);
+                      if(item) saveFileToDB(item).catch(console.error);
                   });
+                  
                   setSelectedItems([]);
                   return;
               }
@@ -786,12 +796,11 @@ export default function WindowsExplorer() {
   const handleRenameSubmit = (e?: React.FormEvent) => {
       e?.preventDefault();
       if (isRenaming && renameValue.trim()) {
-          setFileSystem(prev => {
-              const updated = prev.map(f => f.id === isRenaming ? { ...f, name: renameValue } : f);
-              const item = updated.find(f => f.id === isRenaming);
-              if (item) saveFileToDB(item);
-              return updated;
-          });
+          const updated = fileSystem.map(f => f.id === isRenaming ? { ...f, name: renameValue } : f);
+          setFileSystem(updated);
+          
+          const item = updated.find(f => f.id === isRenaming);
+          if (item) saveFileToDB(item).catch(console.error);
       }
       setIsRenaming(null);
   };
@@ -807,22 +816,21 @@ export default function WindowsExplorer() {
       if (trashAction === 'empty') {
           const trashItems = fileSystem.filter(f => f.isTrashed);
           setFileSystem(prev => prev.filter(f => !f.isTrashed));
-          trashItems.forEach(f => deleteFileFromDB(f.id));
+          trashItems.forEach(f => deleteFileFromDB(f.id).catch(console.error));
       } else {
           // Normal delete action
           if (currentPath === 'trash') {
               // Delete permanently selected items in trash
               setFileSystem(prev => prev.filter(f => !selectedItems.includes(f.id)));
-              selectedItems.forEach(id => deleteFileFromDB(id));
+              selectedItems.forEach(id => deleteFileFromDB(id).catch(console.error));
           } else {
               // Soft delete: Move to Trash
-              setFileSystem(prev => {
-                  const updated = prev.map(f => selectedItems.includes(f.id) ? { ...f, isTrashed: true } : f);
-                  selectedItems.forEach(id => {
-                      const item = updated.find(f => f.id === id);
-                      if (item) saveFileToDB(item);
-                  });
-                  return updated;
+              const updated = fileSystem.map(f => selectedItems.includes(f.id) ? { ...f, isTrashed: true } : f);
+              setFileSystem(updated);
+              
+              selectedItems.forEach(id => {
+                  const item = updated.find(f => f.id === id);
+                  if (item) saveFileToDB(item).catch(console.error);
               });
           }
       }
@@ -833,13 +841,12 @@ export default function WindowsExplorer() {
 
   const handleRestore = () => {
       if (currentPath === 'trash' && selectedItems.length > 0) {
-          setFileSystem(prev => {
-              const updated = prev.map(f => selectedItems.includes(f.id) ? { ...f, isTrashed: false } : f);
-              selectedItems.forEach(id => {
-                  const item = updated.find(f => f.id === id);
-                  if (item) saveFileToDB(item);
-              });
-              return updated;
+          const updated = fileSystem.map(f => selectedItems.includes(f.id) ? { ...f, isTrashed: false } : f);
+          setFileSystem(updated);
+          
+          selectedItems.forEach(id => {
+              const item = updated.find(f => f.id === id);
+              if (item) saveFileToDB(item).catch(console.error);
           });
           setSelectedItems([]);
       }
@@ -1091,7 +1098,7 @@ export default function WindowsExplorer() {
                                             id: newId, name: 'New Folder', type: 'folder', parentId: currentPath, date: new Date().toISOString().split('T')[0]
                                         };
                                         setFileSystem(prev => [...prev, newFolder]);
-                                        saveFileToDB(newFolder);
+                                        saveFileToDB(newFolder).catch(console.error);
                                         setIsRenaming(newId);
                                         setRenameValue('New Folder');
                                         setShowNewMenu(false);
@@ -1129,11 +1136,11 @@ export default function WindowsExplorer() {
                                 
                                 if (clipboard.action === 'cut') {
                                     setFileSystem(prev => prev.map(f => clipboard.items.includes(f.id) ? { ...f, parentId: currentPath } : f));
-                                    itemsToPaste.forEach(item => saveFileToDB({ ...item, parentId: currentPath }));
+                                    itemsToPaste.forEach(item => saveFileToDB({ ...item, parentId: currentPath }).catch(console.error));
                                     setClipboard({ action: null, items: [] });
                                 } else {
                                     setFileSystem(prev => [...prev, ...newItems]);
-                                    newItems.forEach(item => saveFileToDB(item));
+                                    newItems.forEach(item => saveFileToDB(item).catch(console.error));
                                 }
                             }, title: 'Paste', disabled: clipboard.items.length === 0, className: "rotate-45" },
                             { icon: null, label: "ab", action: handleRename, title: 'Rename', disabled: selectedItems.length !== 1 },
@@ -1285,13 +1292,11 @@ export default function WindowsExplorer() {
                                 if (data) {
                                     const movedIds = JSON.parse(data) as string[];
                                     if(movedIds && movedIds.length > 0) {
-                                        setFileSystem(prev => {
-                                            const updated = prev.map(f => movedIds.includes(f.id) ? { ...f, isTrashed: true } : f);
-                                            movedIds.forEach(id => {
-                                                const item = updated.find(f => f.id === id);
-                                                if(item) saveFileToDB(item);
-                                            });
-                                            return updated;
+                                        const updated = fileSystem.map(f => movedIds.includes(f.id) ? { ...f, isTrashed: true } : f);
+                                        setFileSystem(updated);
+                                        movedIds.forEach(id => {
+                                            const item = updated.find(f => f.id === id);
+                                            if(item) saveFileToDB(item).catch(console.error);
                                         });
                                     }
                                 }
@@ -1387,7 +1392,7 @@ export default function WindowsExplorer() {
                                                 setFileSystem(prev => {
                                                     const updated = prev.map(f => f.id === file.id ? { ...f, cover: url } : f);
                                                     const item = updated.find(f => f.id === file.id);
-                                                    if(item) saveFileToDB(item);
+                                                    if(item) saveFileToDB(item).catch(console.error);
                                                     return updated;
                                                 });
                                             }
