@@ -64,9 +64,39 @@ const getBreadcrumbs = (fileSystem: FileSystemItem[], currentId: string) => {
   return breadcrumbs;
 };
 
+// Helper to safely parse JSON without crashing
+const safeJSONParse = (key: string, fallback: any) => {
+    try {
+        const item = localStorage.getItem(key);
+        return item ? JSON.parse(item) : fallback;
+    } catch (e) {
+        console.warn(`Error parsing ${key} from localStorage, resetting to default.`, e);
+        return fallback;
+    }
+};
+
 export default function WindowsExplorer() {
   // Authentication
-  const [user, setUser] = useState<UserAccount | null>(null);
+  const [user, setUser] = useState<UserAccount | null>(() => {
+      const data = safeJSONParse('win11_user', null);
+      
+      // Strict validation: Ensure handle is more than just '@' and other fields exist
+      if (
+          data && 
+          typeof data === 'object' && 
+          typeof data.handle === 'string' && data.handle.trim().length > 1 &&
+          typeof data.displayName === 'string' && data.displayName.trim().length > 0 &&
+          typeof data.pin === 'string' && data.pin.trim().length >= 4
+      ) {
+          return data;
+      }
+      
+      // If data exists but is corrupted or invalid, clear it to force registration
+      if (data) {
+          localStorage.removeItem('win11_user');
+      }
+      return null;
+  });
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   // File System
@@ -99,20 +129,14 @@ export default function WindowsExplorer() {
   const [changePassError, setChangePassError] = useState('');
   const [showPassReveals, setShowPassReveals] = useState({ current: false, new: false, confirm: false });
 
-  const [customBackgrounds, setCustomBackgrounds] = useState<string[]>(() => {
-      const saved = localStorage.getItem('win11_bgs');
-      return saved ? JSON.parse(saved) : [];
-  });
+  const [customBackgrounds, setCustomBackgrounds] = useState<string[]>(() => safeJSONParse('win11_bgs', []));
   
   // Appearance State
-  const [theme, setTheme] = useState(() => {
-      const saved = localStorage.getItem('win11_theme');
-      return saved ? JSON.parse(saved) : {
-          isDark: false,
-          isTransparent: false,
-          backgroundImage: DEFAULT_BACKGROUNDS[0]
-      };
-  });
+  const [theme, setTheme] = useState(() => safeJSONParse('win11_theme', {
+      isDark: false,
+      isTransparent: false,
+      backgroundImage: DEFAULT_BACKGROUNDS[0]
+  }));
 
   // Preview State
   const [previewItem, setPreviewItem] = useState<FileSystemItem | null>(null);
@@ -159,13 +183,6 @@ export default function WindowsExplorer() {
     });
 
   // --- Persistence & Initialization ---
-  useEffect(() => {
-      const savedUser = localStorage.getItem('win11_user');
-      if (savedUser) {
-          setUser(JSON.parse(savedUser));
-      }
-  }, []);
-
   useEffect(() => {
     const init = async () => {
         try {
@@ -251,6 +268,8 @@ export default function WindowsExplorer() {
       setIsLoggedIn(false);
       setShowSettings(false);
       setShowUserMenu(false);
+      // We don't clear 'user' here, so LockScreen shows the last logged-in user.
+      // If the user wants to switch, they can do so on the LockScreen.
   };
 
   const handleChangeUserAvatar = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -291,7 +310,6 @@ export default function WindowsExplorer() {
       
       setUser({ ...user, pin: changePassData.new });
       setShowChangePassModal(false);
-      // Optional: Show a toast notification
   };
 
   const handleNavigate = (folderId: string, replace = false) => {

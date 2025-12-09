@@ -23,6 +23,18 @@ const LockScreen: React.FC<LockScreenProps> = ({ onLogin, existingUser, bgImage 
   const [isCreating, setIsCreating] = useState(!existingUser);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Sync isCreating if existingUser prop changes (e.g. invalid user cleared by parent)
+  useEffect(() => {
+      setIsCreating(!existingUser);
+      if(!existingUser) {
+          setHandle('@');
+          setDisplayName('');
+      } else {
+          setHandle(existingUser.handle);
+          setDisplayName(existingUser.displayName);
+      }
+  }, [existingUser]);
+
   // Default Windows 11 Bloom if no bg provided
   const background = bgImage || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop';
 
@@ -188,24 +200,17 @@ const LockScreen: React.FC<LockScreenProps> = ({ onLogin, existingUser, bgImage 
                 {error && <p className="text-red-300 text-xs text-center bg-red-500/20 py-1 rounded">{error}</p>}
                 
                 <div 
-                    className="text-white/60 text-xs text-center hover:text-white cursor-pointer mt-4"
+                    className="text-white/80 text-sm text-center hover:text-white hover:underline cursor-pointer mt-6 transition-all"
                     onClick={(e) => {
                         e.stopPropagation();
                         if(existingUser) {
                            setIsCreating(!isCreating);
                            setError('');
                            setPin('');
-                           if(!isCreating) {
-                               setHandle('@');
-                               setDisplayName('');
-                           } else {
-                               setHandle(existingUser.handle);
-                               setDisplayName(existingUser.displayName);
-                           }
                         }
                     }}
                 >
-                    {isCreating && existingUser ? "Sign in to existing account?" : (existingUser ? "Create new account?" : "")}
+                    {isCreating && existingUser ? "← Back to Sign In" : (existingUser ? "Switch to new account" : "")}
                 </div>
             </form>
         </div>
